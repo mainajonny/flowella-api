@@ -8,44 +8,40 @@ from core.database import db_dependancy
 from db.schemas.user_schema import User, CreateUser, PatchUser
 from db.models import user_model
 from services import user_service as _service
+from services.auth_service import auth_user_dependency
 from config import settings
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
 
 @router.post("/", response_model=User)
-async def create_user(user: CreateUser, db: db_dependancy):
-    return await _service.create_user(user=user, db=db)
+async def create_user(user: CreateUser, db: db_dependancy, current_user: auth_user_dependency):
+    return await _service.create_user(user=user, db=db, current_user=current_user)
 
 
 @router.get("/", response_model=List[User])
-async def get_users(db: db_dependancy):
-    return await _service.get_all_users(db=db)
+async def get_users(db: db_dependancy, current_user: auth_user_dependency):
+    return await _service.get_all_users(db=db, current_user=current_user)
 
 
 @router.get("/{user_id}/", response_model=User)
-async def get_user(user_id: UUID, db: db_dependancy):
-    request_user = await _service.get_user(user_id=user_id, db=db)
-    if request_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=settings.NO_USER_ERROR)
-
-    return request_user
+async def get_user(user_id: UUID, db: db_dependancy, current_user: auth_user_dependency):
+    return await _service.get_user(user_id=user_id, db=db, current_user=current_user)
 
 
 @router.delete("/{user_id}/")
-async def delete_user(user_id: UUID, db: db_dependancy):
-    request_user = await _service.get_user(user_id=user_id, db=db)
+async def delete_user(user_id: UUID, db: db_dependancy, current_user: auth_user_dependency):
+    request_user = await _service.get_user(user_id=user_id, db=db, current_user=current_user)
     if request_user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=settings.NO_USER_ERROR)
 
-    return await _service.delete_user(user=request_user, db=db)
+    return await _service.delete_user(user=request_user, db=db, current_user=current_user)
 
 
 @router.put("/{user_id}/", response_model=User)
-async def edit_user(user_id: UUID, user_data: CreateUser, db: db_dependancy):
-    request_user = await _service.get_user(user_id=user_id, db=db)
+async def edit_user(user_id: UUID, user_data: CreateUser, db: db_dependancy, current_user: auth_user_dependency):
+    request_user = await _service.get_user(user_id=user_id, db=db, current_user=current_user)
     if request_user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=settings.NO_USER_ERROR)
@@ -86,14 +82,14 @@ async def edit_user(user_id: UUID, user_data: CreateUser, db: db_dependancy):
                 }
             )
 
-    return await _service.update_user(user=request_user, user_data=user_data, db=db)
+    return await _service.update_user(user=request_user, user_data=user_data, db=db, current_user=current_user)
 
 
 @router.patch("/{user_id}/", response_model=User)
-async def patch_user(user_id: UUID, user_patch: PatchUser, db: db_dependancy):
-    request_user = await _service.get_user(user_id=user_id, db=db)
+async def patch_user(user_id: UUID, user_patch: PatchUser, db: db_dependancy, current_user: auth_user_dependency):
+    request_user = await _service.get_user(user_id=user_id, db=db, current_user=current_user)
     if request_user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=settings.NO_USER_ERROR)
 
-    return await _service.patch_user(user=request_user, user_patch=user_patch, db=db)
+    return await _service.patch_user(user=request_user, user_patch=user_patch, db=db, current_user=current_user)

@@ -1,9 +1,14 @@
+from uuid import UUID
 from pydantic import BaseModel
 
 
-class AuthRequest(BaseModel):
+class _BaseAuthRequest(BaseModel):
     email: str
     password: str
+
+
+class AuthRequest(_BaseAuthRequest):
+    pass
 
 
 class Token(BaseModel):
@@ -12,6 +17,4 @@ class Token(BaseModel):
 
 
 class TokenData(BaseModel):
-    email: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
+    user_id: UUID | None = None

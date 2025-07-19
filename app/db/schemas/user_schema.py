@@ -24,6 +24,7 @@ class PatchUser(_BaseUser):
 
 class User(_BaseUser):
     id: UUID
+    is_active: bool
     created_at: datetime
     password: str = Field(exclude=True)
 
