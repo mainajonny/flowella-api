@@ -1,4 +1,12 @@
+import string as _s
+
+from random import choices
 from bcrypt import hashpw, gensalt, checkpw
+
+
+def generate_password(length: int):
+    chars = _s.ascii_letters + _s.digits
+    return ''.join(choices(chars, k=length))
 
 
 def get_password_hash(password: str) -> str:

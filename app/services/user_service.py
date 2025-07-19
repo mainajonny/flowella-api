@@ -1,17 +1,16 @@
-
-import string as _s
-import pdb
-
-from random import choices
 from uuid import UUID
+from click import echo
 from fastapi import HTTPException
 from starlette import status
 from typing import TYPE_CHECKING, List
 from passlib.context import CryptContext
+from sqlalchemy.exc import IntegrityError
 from psycopg2.errors import UniqueViolation
+from config import settings
 
+from util.auth_utils import generate_password, get_password_hash
 from db.schemas.user_schema import CreateUser, User, PatchUser
-from db.models import user_model
+from db.models.user_model import User as UserModel
 
 
 if TYPE_CHECKING:
@@ -20,36 +19,43 @@ if TYPE_CHECKING:
 pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 
 
-def generate_password(length=7):
-    chars = _s.ascii_letters + _s.digits
-    return ''.join(choices(chars, k=length))
+async def create_user(user: CreateUser, db: "Session", current_user: UserModel) -> User:
+    if current_user is None:
+        raise settings.UNAUTHORIZED_ERROR
 
-
-def hash_password(password: str):
-    hashed_password = pwd_context.hash(password)
-    return hashed_password
-
-
-async def create_user(user: CreateUser, db: "Session") -> User:
-    db_user = user_model.User(**user.model_dump())
-    plain_password = generate_password()
-    db_user.password = hash_password(plain_password)
+    db_user = UserModel(**user.model_dump())
+    plain_password = generate_password(length=7)
+    echo(f"@@ Generated password for user {db_user.email}: {plain_password}")
+    db_user.password = get_password_hash(plain_password)
     try:
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
         # generate email def using {plain_password}
-    except Exception as e:
+
+    except IntegrityError as e:
         db.rollback()
-        # Check for unique constraint violation (email or other unique fields)
+        # Check for unique constraint violation (email or phone number fields)
+        if hasattr(e, "orig") and isinstance(e.orig, UniqueViolation):
+            message = str(e.orig)
 
-        pdb.set_trace()
+            if "phone_number" in message:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error": "Duplicate entry",
+                        "message": f"A user with phone number ({db_user.phone_number}) already exists.",
+                    }
+                )
+            elif "email" in message:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error": "Duplicate entry",
+                        "message": f"A user with email ({db_user.email}) already exists.",
+                    }
+                )
 
-        if hasattr(e, 'orig') and isinstance(e.orig, UniqueViolation):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="A user with this email already exists."
-            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -58,9 +64,12 @@ async def create_user(user: CreateUser, db: "Session") -> User:
     return User.model_validate(db_user)
 
 
-async def get_all_users(db: "Session") -> List[User]:
+async def get_all_users(db: "Session", current_user: UserModel) -> List[User]:
+    if current_user is None:
+        raise settings.UNAUTHORIZED_ERROR
+
     try:
-        db_users = db.query(user_model.User).all()
+        db_users = db.query(UserModel).all()
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -69,10 +78,15 @@ async def get_all_users(db: "Session") -> List[User]:
     return [User.model_validate(db_user) for db_user in db_users]
 
 
-async def get_user(user_id: UUID, db: "Session"):
+async def get_user(user_id: UUID, db: "Session", current_user: UserModel) -> User:
+    if current_user is None:
+        raise settings.UNAUTHORIZED_ERROR
+
+    if current_user.id != user_id:
+        raise settings.UNAUTHORIZED_ALTER_ERROR
+
     try:
-        db_user = db.query(user_model.User).filter(
-            user_model.User.id == user_id).first()
+        db_user = db.query(UserModel).filter(UserModel.id == user_id).first()
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -81,19 +95,10 @@ async def get_user(user_id: UUID, db: "Session"):
     return db_user
 
 
-async def get_user_by_email(email: str, db: "Session"):
-    try:
-        db_user = db.query(user_model.User).filter(
-            user_model.User.email == email).first()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+async def delete_user(user: UserModel, db: "Session", current_user: UserModel):
+    if current_user is None:
+        raise settings.UNAUTHORIZED_ERROR
 
-    return db_user
-
-
-async def delete_user(user: user_model.User, db: "Session"):
     try:
         db.delete(user)
         db.commit()
@@ -105,7 +110,10 @@ async def delete_user(user: user_model.User, db: "Session"):
     return {"status": "success", "message": "User deleted successfully!"}
 
 
-async def update_user(user_data: CreateUser, user: user_model.User, db: "Session") -> User:
+async def update_user(user_data: CreateUser, user: UserModel, db: "Session", current_user: UserModel) -> User:
+    if current_user is None:
+        raise settings.UNAUTHORIZED_ERROR
+
     user.first_name = user_data.first_name
     user.last_name = user_data.last_name
     user.email = user_data.email
@@ -122,7 +130,10 @@ async def update_user(user_data: CreateUser, user: user_model.User, db: "Session
     return User.model_validate(user)
 
 
-async def patch_user(user: user_model.User, user_patch: PatchUser, db: "Session") -> User:
+async def patch_user(user: UserModel, user_patch: PatchUser, db: "Session", current_user: UserModel) -> User:
+    if current_user is None:
+        raise settings.UNAUTHORIZED_ERROR
+
     for field, value in user_patch.model_dump(exclude_unset=True).items():
         setattr(user, field, value)
 
@@ -135,3 +146,16 @@ async def patch_user(user: user_model.User, user_patch: PatchUser, db: "Session"
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     return User.model_validate(user)
+
+# async def get_user_by_email(email: str, db: "Session", current_user: UserModel):
+#     if current_user is None:
+#         raise settings.UNAUTHORIZED_ERROR
+
+#     try:
+#         db_user = db.query(UserModel).filter(UserModel.email == email).first()
+#     except Exception as e:
+#         db.rollback()
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+#     return db_user
